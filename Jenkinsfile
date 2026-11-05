@@ -78,12 +78,18 @@ stage('Smoke Test') {
         script {
             echo "Starting ASP.NET container..."
 
-            def container = docker.image(FULL_IMAGE).run('-d -p 8081:8080')
+            // Start container and capture its actual ID
+            def containerId = powershell(
+                script: """
+                    docker run --detach --publish 8081:8080 ${FULL_IMAGE}
+                """,
+                returnStdout: true
+            ).trim()
+
+            echo "Container ID: ${containerId}"
 
             try {
-                sleep 5
-
-                echo "Checking ASP.NET application..."
+                echo "Waiting for ASP.NET application..."
 
                 def response = powershell(
                     script: '''
@@ -93,7 +99,7 @@ stage('Smoke Test') {
                         for ($i = 1; $i -le $maxAttempts; $i++) {
                             try {
                                 $response = Invoke-WebRequest `
-                                    -Uri "http://localhost:8080/" `
+                                    -Uri "http://localhost:8081/" `
                                     -UseBasicParsing `
                                     -TimeoutSec 5
 
@@ -103,7 +109,7 @@ stage('Smoke Test') {
                                 }
                             }
                             catch {
-                                Write-Output "Attempt $i failed. Retrying..."
+                                Write-Output "Attempt $i failed: $($_.Exception.Message)"
                                 Start-Sleep -Seconds 2
                             }
                         }
@@ -120,10 +126,23 @@ stage('Smoke Test') {
                 echo response
                 echo "Smoke test passed!"
 
+            } catch (Exception e) {
+
+                echo "Smoke test failed. Collecting container logs..."
+
+                powershell """
+                    docker logs ${containerId}
+                """
+
+                throw e
+
             } finally {
-                echo "Stopping test container..."
-                container.stop()
-                sh "docker rm -f ${container.id} || true"
+
+                echo "Removing test container..."
+
+                powershell """
+                    docker rm -f ${containerId}
+                """
             }
         }
     }
