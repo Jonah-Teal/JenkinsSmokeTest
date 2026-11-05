@@ -7,7 +7,7 @@ pipeline {
     parameters {
         string(
             name: 'DOCKERHUB_USERNAME',
-            defaultValue: 'Docker-Creds',
+            defaultValue: 'jonahteal',
             description: 'Your Docker Hub username'
         )
         string(
@@ -120,7 +120,7 @@ pipeline {
 
                     // 'dockerhub-credentials' must exist in Jenkins
                     // (Manage Jenkins → Credentials → Username with password)
-                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
+                    docker.withRegistry('https://index.docker.io/v1/', 'Docker-Creds') {
                         def image = docker.image(FULL_IMAGE)
                         image.push()                         // push the build-number tag
 
@@ -147,11 +147,13 @@ pipeline {
             """
         }
         success {
-            echo "=============================================="
-            echo " Pipeline succeeded!"
-            echo " Image : ${FULL_IMAGE}"
-            if (params.PUSH_LATEST) {
-                echo " Also  : ${IMAGE_NAME}:latest"
+            script {
+                echo "=============================================="
+                echo " Pipeline succeeded!"
+                echo " Image : ${FULL_IMAGE}"
+                if (params.PUSH_LATEST) {
+                    echo " Also  : ${IMAGE_NAME}:latest"
+                }    
             }
             echo "=============================================="
         }
