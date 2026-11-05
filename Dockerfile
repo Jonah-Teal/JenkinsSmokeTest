@@ -1,36 +1,19 @@
-# -----------------------------
-# Stage 1: Build
-# -----------------------------
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
+# https://hub.docker.com/_/microsoft-dotnet
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
 
-# 1. Copy the solution and project file first (better caching)
-COPY *.sln ./
-COPY MyProject/MyProject.csproj MyProject/
+# copy csproj and restore as distinct layers
+COPY *.sln .
+COPY aspnetapp/*.csproj ./aspnetapp/
+RUN dotnet restore
 
-# 2. Restore
-RUN dotnet restore MyProject/MyProject.csproj
+# copy everything else and build app
+COPY aspnetapp/. ./aspnetapp/
+WORKDIR /source/aspnetapp
+RUN dotnet publish -c release -o /app --no-restore
 
-# 3. Copy the rest of the source code
-COPY . .
-
-# 4. Publish
-WORKDIR /src/MyProject
-RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
-
-# -----------------------------
-# Stage 2: Runtime
-# -----------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+# final stage/image
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
-
-# Non-root user
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
-USER appuser
-
-COPY --from=build /app/publish .
-
-ENV ASPNETCORE_URLS=http://+:8080
-EXPOSE 8080
-
-ENTRYPOINT ["dotnet", "MyProject.dll"]
+COPY --from=build /app ./
+ENTRYPOINT ["dotnet", "aspnetapp.dll"]
