@@ -1,5 +1,5 @@
 FROM nginx:alpine
 RUN rm -rf /usr/share/nginx/html/*
-COPY Pages/index.html /usr/share/nginx/html/index.html
+COPY pages/index.html /usr/share/nginx/html/index.html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
