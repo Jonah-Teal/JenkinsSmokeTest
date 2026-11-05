@@ -157,7 +157,7 @@ stage('Smoke Test') {
                     echo "Pushing ${FULL_IMAGE} to Docker Hub..."
 
                     // Credential ID must match what you created in Jenkins
-                    docker.withRegistry('https://index.docker.io/v1/', 'Docker-Creds') {
+                    docker.withRegistry('https://index.docker.io/v1/', '9766f83d-7c0b-4bde-95f4-103ec74e1d22') {
                         def image = docker.image(FULL_IMAGE)
                         image.push()                         // push the build-number tag
 
