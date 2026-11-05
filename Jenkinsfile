@@ -73,51 +73,61 @@ pipeline {
         // ---------------------------------------------------
         // 3. Simple smoke test – start the container and hit it
         // ---------------------------------------------------
-        stage('Smoke Test') {
-            steps {
-                script {
-                    echo "Starting container for smoke test..."
-                    // Run the container in the background, publish a random host port
-                    def container = docker.image(FULL_IMAGE).run('-d -P')
+stage('Smoke Test') {
+    steps {
+        script {
+            echo "Starting ASP.NET container..."
 
-                    try {
-                        // Give Nginx a couple of seconds to start
-                        sleep 3
+            def container = docker.image(FULL_IMAGE).run('-d -p 8080:8080')
 
-                        // On Windows, docker port returns something like:
-                        // 0.0.0.0:32768
-                        // We extract the port number with PowerShell
-                        def hostPort = powershell(
-                            returnStdout: true,
-                            script: """
-                                \$portLine = docker port ${container.id} 80
-                                if (\$portLine -match ':(\\d+)\$') {
-                                    \$matches[1]
-                                } else {
-                                    throw "Could not parse port from: \$portLine"
+            try {
+                sleep 5
+
+                echo "Checking ASP.NET application..."
+
+                def response = powershell(
+                    script: '''
+                        $maxAttempts = 10
+                        $success = $false
+
+                        for ($i = 1; $i -le $maxAttempts; $i++) {
+                            try {
+                                $response = Invoke-WebRequest `
+                                    -Uri "http://localhost:8080/" `
+                                    -UseBasicParsing `
+                                    -TimeoutSec 5
+
+                                if ($response.StatusCode -eq 200) {
+                                    $success = $true
+                                    break
                                 }
-                            """
-                        ).trim()
-
-                        echo "Container is listening on host port ${hostPort}"
-
-                        // Hit the page and fail the stage if we don't get HTTP 200
-                        // Using PowerShell's Invoke-WebRequest
-                        powershell """
-                            \$response = Invoke-WebRequest -Uri "http://localhost:${hostPort}/" -UseBasicParsing -ErrorAction Stop
-                            if (\$response.StatusCode -ne 200) {
-                                throw "Expected HTTP 200 but got \$(\$response.StatusCode)"
                             }
-                            Write-Host "Smoke test passed – page returned HTTP 200"
-                        """
-                    } finally {
-                        // Always stop and remove the test container
-                        container.stop()
-                        bat "docker rm -f ${container.id} || exit 0"
-                    }
-                }
+                            catch {
+                                Write-Output "Attempt $i failed. Retrying..."
+                                Start-Sleep -Seconds 2
+                            }
+                        }
+
+                        if (-not $success) {
+                            throw "ASP.NET smoke test failed."
+                        }
+
+                        Write-Output "HTTP Status: $($response.StatusCode)"
+                    ''',
+                    returnStdout: true
+                ).trim()
+
+                echo response
+                echo "Smoke test passed!"
+
+            } finally {
+                echo "Stopping test container..."
+                container.stop()
+                sh "docker rm -f ${container.id} || true"
             }
         }
+    }
+}
 
         // ---------------------------------------------------
         // 4. Push the image to Docker Hub
