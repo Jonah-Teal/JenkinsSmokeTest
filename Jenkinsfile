@@ -62,9 +62,7 @@ pipeline {
             steps {
                 script {
                     echo "Building image: ${FULL_IMAGE}"
-                    // docker.build returns a Docker image object
                     def customImage = docker.build(FULL_IMAGE)
-                    // Optionally tag as latest locally so the test stage can use it
                     if (params.PUSH_LATEST) {
                         customImage.tag('latest')
                     }
@@ -79,32 +77,43 @@ pipeline {
             steps {
                 script {
                     echo "Starting container for smoke test..."
-                    // Run the container in the background, map a random host port
+                    // Run the container in the background, publish a random host port
                     def container = docker.image(FULL_IMAGE).run('-d -P')
 
                     try {
                         // Give Nginx a couple of seconds to start
                         sleep 3
 
-                        // Discover the host port that was mapped to container port 80
-                        def hostPort = sh(
-                            script: "docker port ${container.id} 80 | cut -d: -f2",
-                            returnStdout: true
+                        // On Windows, docker port returns something like:
+                        // 0.0.0.0:32768
+                        // We extract the port number with PowerShell
+                        def hostPort = powershell(
+                            returnStdout: true,
+                            script: """
+                                \$portLine = docker port ${container.id} 80
+                                if (\$portLine -match ':(\\d+)\$') {
+                                    \$matches[1]
+                                } else {
+                                    throw "Could not parse port from: \$portLine"
+                                }
+                            """
                         ).trim()
 
                         echo "Container is listening on host port ${hostPort}"
 
                         // Hit the page and fail the stage if we don't get HTTP 200
-                        sh """
-                            curl -f -s -o /dev/null -w "%{http_code}" http://localhost:${hostPort}/ | grep -q 200
+                        // Using PowerShell's Invoke-WebRequest
+                        powershell """
+                            \$response = Invoke-WebRequest -Uri "http://localhost:${hostPort}/" -UseBasicParsing -ErrorAction Stop
+                            if (\$response.StatusCode -ne 200) {
+                                throw "Expected HTTP 200 but got \$(\$response.StatusCode)"
+                            }
+                            Write-Host "Smoke test passed – page returned HTTP 200"
                         """
-                        echo "Smoke test passed – page returned HTTP 200"
                     } finally {
                         // Always stop and remove the test container
                         container.stop()
-                        // docker.image(...).run() already removed it when stopped in most cases,
-                        // but this is extra safety
-                        sh "docker rm -f ${container.id} || true"
+                        bat "docker rm -f ${container.id} || exit 0"
                     }
                 }
             }
@@ -118,8 +127,7 @@ pipeline {
                 script {
                     echo "Pushing ${FULL_IMAGE} to Docker Hub..."
 
-                    // 'dockerhub-credentials' must exist in Jenkins
-                    // (Manage Jenkins → Credentials → Username with password)
+                    // Credential ID must match what you created in Jenkins
                     docker.withRegistry('https://index.docker.io/v1/', 'Docker-Creds') {
                         def image = docker.image(FULL_IMAGE)
                         image.push()                         // push the build-number tag
@@ -141,9 +149,9 @@ pipeline {
         always {
             // Clean up local images to keep the Jenkins agent disk clean
             echo "Cleaning up local Docker images..."
-            sh """
-                docker rmi ${FULL_IMAGE} || true
-                docker rmi ${IMAGE_NAME}:latest || true
+            bat """
+                docker rmi ${FULL_IMAGE} 2>nul || exit 0
+                docker rmi ${IMAGE_NAME}:latest 2>nul || exit 0
             """
         }
         success {
@@ -153,16 +161,19 @@ pipeline {
                 echo " Image : ${FULL_IMAGE}"
                 if (params.PUSH_LATEST) {
                     echo " Also  : ${IMAGE_NAME}:latest"
-                }    
+                }
+                echo "=============================================="
             }
-            echo "=============================================="
         }
         failure {
             echo "Pipeline failed. Check the stage logs above."
         }
         cleanup {
             // Extra safety – remove any leftover containers from failed tests
-            sh 'docker ps -aq --filter "ancestor=${FULL_IMAGE}" | xargs -r docker rm -f || true'
+            bat """
+                for /f "tokens=*" %%i in ('docker ps -aq --filter "ancestor=${FULL_IMAGE}" 2^>nul') do docker rm -f %%i 2>nul
+                exit 0
+            """
         }
     }
 }
